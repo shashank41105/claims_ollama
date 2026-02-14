@@ -26,9 +26,3 @@ Desktop.ini
 .env
 config.yaml
 
-# FAISS index (can be regenerated)
-faiss_index/
-
-# Uploaded documents (user data)
-documents/*.pdf
-documents/*.PDF

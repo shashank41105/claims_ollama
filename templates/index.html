@@ -1,0 +1,623 @@
+<!DOCTYPE html>
+<html lang="en" class="scroll-smooth">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ClaimTrackr - AI-Powered Claims Processing</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+            theme: {
+                extend: {
+                    colors: {
+                        primary: '#3b82f6',
+                        secondary: '#8b5cf6',
+                    }
+                }
+            }
+        }
+    </script>
+    <style>
+        @keyframes fadeIn {
+            from {
+                opacity: 0;
+                transform: translateY(20px);
+            }
+
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        .fade-in {
+            animation: fadeIn 0.6s ease-out;
+        }
+
+        @keyframes spin {
+            to {
+                transform: rotate(360deg);
+            }
+        }
+
+        .spinner {
+            border: 3px solid rgba(59, 130, 246, 0.3);
+            border-radius: 50%;
+            border-top-color: #3b82f6;
+            width: 40px;
+            height: 40px;
+            animation: spin 0.8s linear infinite;
+        }
+
+        .glass {
+            background: rgba(255, 255, 255, 0.1);
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+        }
+
+        .dark .glass {
+            background: rgba(0, 0, 0, 0.2);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+    </style>
+</head>
+
+<body
+    class="bg-gradient-to-br from-blue-50 via-white to-purple-50 dark:from-gray-900 dark:via-gray-800 dark:to-gray-900 min-h-screen transition-colors duration-300">
+
+    <!-- Dark Mode Toggle -->
+    <div class="fixed top-4 right-4 z-50">
+        <button onclick="toggleDarkMode()"
+            class="p-3 rounded-full bg-white dark:bg-gray-800 shadow-lg hover:shadow-xl transition-all duration-300 transform hover:scale-110">
+            <svg class="w-6 h-6 text-gray-800 dark:text-yellow-400" fill="none" stroke="currentColor"
+                viewBox="0 0 24 24">
+                <path class="dark:hidden" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                    d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z"></path>
+                <path class="hidden dark:block" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                    d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364 6.364l-.707-.707M6.343 6.343l-.707-.707m12.728 0l-.707.707M6.343 17.657l-.707.707M16 12a4 4 0 11-8 0 4 4 0 018 0z">
+                </path>
+            </svg>
+        </button>
+    </div>
+
+    <!-- Ollama Status Banner -->
+    {% if not ollama_status %}
+    <div class="bg-red-500 text-white py-3 px-4 text-center">
+        <div class="max-w-7xl mx-auto flex items-center justify-center gap-2">
+            <svg class="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
+                <path fill-rule="evenodd"
+                    d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z"
+                    clip-rule="evenodd" />
+            </svg>
+            <span class="font-medium">{{ ollama_message | e }}</span>
+        </div>
+    </div>
+    {% endif %}
+
+    <!-- Hero Section -->
+    <section class="relative overflow-hidden">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-20 pb-16">
+            <div class="lg:grid lg:grid-cols-2 lg:gap-12 items-center">
+                <!-- Left Content -->
+                <div class="fade-in mb-12 lg:mb-0">
+                    <div
+                        class="inline-flex items-center space-x-3 bg-blue-100 dark:bg-blue-900/30 rounded-full px-4 py-2 mb-6">
+                        <img class="h-8 w-8"
+                            src="https://res.cloudinary.com/dtsuvx8dz/image/upload/v1711258410/mf2hcco2w3ekb5ngrngg.svg"
+                            alt="Bupa Logo">
+                        <span class="text-sm font-semibold text-blue-600 dark:text-blue-400">Bupa | Insurance Claim
+                            Service</span>
+                        <svg class="w-4 h-4 text-blue-400" viewBox="0 0 20 20" fill="currentColor">
+                            <path fill-rule="evenodd"
+                                d="M7.21 14.77a.75.75 0 01.02-1.06L11.168 10 7.23 6.29a.75.75 0 111.04-1.08l4.5 4.25a.75.75 0 010 1.08l-4.5 4.25a.75.75 0 01-1.06-.02z"
+                                clip-rule="evenodd" />
+                        </svg>
+                    </div>
+
+                    <h1 class="text-5xl sm:text-6xl font-bold text-gray-900 dark:text-white mb-6 leading-tight">
+                        AI-Powered Claims Processing
+                    </h1>
+
+                    <p class="text-xl text-gray-600 dark:text-gray-300 mb-8 leading-relaxed">
+                        Simplify your claims process with our efficient and reliable service powered by local AI.
+                        We're here to support you every step of the way, ensuring a smooth and hassle-free experience.
+                    </p>
+
+                    <div class="flex flex-wrap gap-4 mb-8">
+                        <div class="flex items-center space-x-2 glass px-4 py-2 rounded-lg">
+                            <svg class="w-5 h-5 text-green-500" fill="currentColor" viewBox="0 0 20 20">
+                                <path fill-rule="evenodd"
+                                    d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z"
+                                    clip-rule="evenodd" />
+                            </svg>
+                            <span class="text-sm font-medium text-gray-700 dark:text-gray-300">Quick Processing</span>
+                        </div>
+                        <div class="flex items-center space-x-2 glass px-4 py-2 rounded-lg">
+                            <svg class="w-5 h-5 text-blue-500" fill="currentColor" viewBox="0 0 20 20">
+                                <path fill-rule="evenodd"
+                                    d="M2.166 4.999A11.954 11.954 0 0010 1.944 11.954 11.954 0 0017.834 5c.11.65.166 1.32.166 2.001 0 5.225-3.34 9.67-8 11.317C5.34 16.67 2 12.225 2 7c0-.682.057-1.35.166-2.001zm11.541 3.708a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z"
+                                    clip-rule="evenodd" />
+                            </svg>
+                            <span class="text-sm font-medium text-gray-700 dark:text-gray-300">Secure & Private</span>
+                        </div>
+                        <div class="flex items-center space-x-2 glass px-4 py-2 rounded-lg">
+                            <svg class="w-5 h-5 text-purple-500" fill="currentColor" viewBox="0 0 20 20">
+                                <path d="M9 2a1 1 0 000 2h2a1 1 0 100-2H9z" />
+                                <path fill-rule="evenodd"
+                                    d="M4 5a2 2 0 012-2 3 3 0 003 3h2a3 3 0 003-3 2 2 0 012 2v11a2 2 0 01-2 2H6a2 2 0 01-2-2V5zm3 4a1 1 0 000 2h.01a1 1 0 100-2H7zm3 0a1 1 0 000 2h3a1 1 0 100-2h-3zm-3 4a1 1 0 100 2h.01a1 1 0 100-2H7zm3 0a1 1 0 100 2h3a1 1 0 100-2h-3z"
+                                    clip-rule="evenodd" />
+                            </svg>
+                            <span class="text-sm font-medium text-gray-700 dark:text-gray-300">Runs Locally</span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Right Image/Animation -->
+                <div class="relative lg:h-[500px] flex items-center justify-center">
+                    <div
+                        class="absolute inset-0 bg-gradient-to-r from-blue-400 to-purple-500 rounded-full blur-3xl opacity-20 animate-pulse">
+                    </div>
+                    <img src="https://res.cloudinary.com/dtsuvx8dz/image/upload/v1711259786/uybnwvwbfyyq8ej8ziz0.gif"
+                        class="relative z-10 drop-shadow-2xl w-64 h-64 object-contain" alt="Processing Animation">
+                    <div class="absolute bottom-0 right-0 glass rounded-2xl p-6 max-w-xs z-20">
+                        <p class="font-bold text-2xl text-gray-800 dark:text-white leading-tight">
+                            Quick,<br>
+                            Reliable,<br>
+                            Hassle-Free<br>
+                            <span class="text-blue-500">PROCESS</span>
+                        </p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Form Section -->
+    <section class="py-16 px-4">
+        <div class="max-w-7xl mx-auto">
+            <div class="grid grid-cols-1 lg:grid-cols-3 gap-8">
+                <!-- Left Info Panel -->
+                <div class="space-y-6">
+                    <div class="glass rounded-2xl p-6 dark:bg-gray-800/50">
+                        <h2 class="text-3xl font-bold text-gray-900 dark:text-white mb-3">Submit Your Claim</h2>
+                        <p class="text-gray-600 dark:text-gray-300 mb-4">Please provide accurate information to verify
+                            your claim efficiently.</p>
+                        <img src="https://res.cloudinary.com/dtsuvx8dz/image/upload/v1711281782/wjmjc8ggzcgx14gvl0sy.gif"
+                            class="w-full max-w-xs mx-auto rounded-lg" alt="Claim Processing">
+                    </div>
+
+                    <div class="glass rounded-2xl p-6 dark:bg-gray-800/50">
+                        <h3 class="font-semibold text-lg text-gray-900 dark:text-white mb-3 flex items-center">
+                            <svg class="w-5 h-5 text-blue-500 mr-2" fill="currentColor" viewBox="0 0 20 20">
+                                <path fill-rule="evenodd"
+                                    d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z"
+                                    clip-rule="evenodd" />
+                            </svg>
+                            Required Information
+                        </h3>
+                        <ul class="space-y-2 text-sm text-gray-600 dark:text-gray-300">
+                            <li class="flex items-start">
+                                <svg class="w-4 h-4 text-green-500 mr-2 mt-0.5" fill="currentColor" viewBox="0 0 20 20">
+                                    <path fill-rule="evenodd"
+                                        d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z"
+                                        clip-rule="evenodd" />
+                                </svg>
+                                Patient's full name
+                            </li>
+                            <li class="flex items-start">
+                                <svg class="w-4 h-4 text-green-500 mr-2 mt-0.5" fill="currentColor" viewBox="0 0 20 20">
+                                    <path fill-rule="evenodd"
+                                        d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z"
+                                        clip-rule="evenodd" />
+                                </svg>
+                                Treatment date and diagnosis
+                            </li>
+                            <li class="flex items-start">
+                                <svg class="w-4 h-4 text-green-500 mr-2 mt-0.5" fill="currentColor" viewBox="0 0 20 20">
+                                    <path fill-rule="evenodd"
+                                        d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z"
+                                        clip-rule="evenodd" />
+                                </svg>
+                                Itemized medical bill (PDF)
+                            </li>
+                            <li class="flex items-start">
+                                <svg class="w-4 h-4 text-green-500 mr-2 mt-0.5" fill="currentColor" viewBox="0 0 20 20">
+                                    <path fill-rule="evenodd"
+                                        d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z"
+                                        clip-rule="evenodd" />
+                                </svg>
+                                Breakdown of charges
+                            </li>
+                        </ul>
+                    </div>
+                </div>
+
+                <!-- Main Form -->
+                <div class="lg:col-span-2">
+                    <form id="claimForm" class="bg-white dark:bg-gray-800 shadow-2xl rounded-2xl overflow-hidden">
+                        <div class="p-8 space-y-6">
+                            <!-- Patient Name -->
+                            <div>
+                                <label for="name"
+                                    class="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">
+                                    Submit Claim For *
+                                </label>
+                                <input type="text" id="name" name="name" required
+                                    class="w-full px-4 py-3 rounded-lg border-2 border-gray-200 dark:border-gray-600 dark:bg-gray-700 dark:text-white focus:border-blue-500 focus:ring-2 focus:ring-blue-200 transition-all duration-200"
+                                    placeholder="Patient's full name">
+                            </div>
+
+                            <!-- Claim Type and Reason -->
+                            <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                                <div>
+                                    <label for="claim_type"
+                                        class="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">
+                                        Claim Item *
+                                    </label>
+                                    <select id="claim_type" name="claim_type" required
+                                        class="w-full px-4 py-3 rounded-lg border-2 border-gray-200 dark:border-gray-600 dark:bg-gray-700 dark:text-white focus:border-blue-500 focus:ring-2 focus:ring-blue-200 transition-all duration-200">
+                                        <option value="" disabled selected>Please Select</option>
+                                        <option value="General Practitioner">General Practitioner</option>
+                                        <option value="Specialist">Specialist</option>
+                                        <option value="Prescribed Western Medication">Prescribed Western Medication
+                                        </option>
+                                        <option value="Diag. Imaging & Lab Tests">Diag. Imaging & Lab Tests</option>
+                                        <option value="Health Check-up">Health Check-up</option>
+                                        <option value="Bonesetter">Bonesetter</option>
+                                        <option value="Vaccination">Vaccination</option>
+                                        <option value="Physiotherapist">Physiotherapist</option>
+                                        <option value="Chiropractor">Chiropractor</option>
+                                        <option value="Dental Consultation">Dental Consultation</option>
+                                        <option value="Psychiatric-related Treatments">Psychiatric-related Treatments
+                                        </option>
+                                    </select>
+                                </div>
+
+                                <div>
+                                    <label for="claim_reason"
+                                        class="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">
+                                        Claim Reason *
+                                    </label>
+                                    <input type="text" id="claim_reason" name="claim_reason" required
+                                        class="w-full px-4 py-3 rounded-lg border-2 border-gray-200 dark:border-gray-600 dark:bg-gray-700 dark:text-white focus:border-blue-500 focus:ring-2 focus:ring-blue-200 transition-all duration-200"
+                                        placeholder="e.g., Fever, Consultation">
+                                </div>
+                            </div>
+
+                            <!-- Address -->
+                            <div>
+                                <label for="address"
+                                    class="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">
+                                    Patient Address
+                                </label>
+                                <textarea id="address" name="address" rows="2"
+                                    class="w-full px-4 py-3 rounded-lg border-2 border-gray-200 dark:border-gray-600 dark:bg-gray-700 dark:text-white focus:border-blue-500 focus:ring-2 focus:ring-blue-200 transition-all duration-200"
+                                    placeholder="Complete address"></textarea>
+                            </div>
+
+                            <!-- Date, Facility, Amount -->
+                            <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+                                <div>
+                                    <label for="date"
+                                        class="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">
+                                        Treatment Date
+                                    </label>
+                                    <input type="date" id="date" name="date"
+                                        class="w-full px-4 py-3 rounded-lg border-2 border-gray-200 dark:border-gray-600 dark:bg-gray-700 dark:text-white focus:border-blue-500 focus:ring-2 focus:ring-blue-200 transition-all duration-200">
+                                </div>
+
+                                <div>
+                                    <label for="medical_facility"
+                                        class="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">
+                                        Medical Facility
+                                    </label>
+                                    <input type="text" id="medical_facility" name="medical_facility"
+                                        class="w-full px-4 py-3 rounded-lg border-2 border-gray-200 dark:border-gray-600 dark:bg-gray-700 dark:text-white focus:border-blue-500 focus:ring-2 focus:ring-blue-200 transition-all duration-200"
+                                        placeholder="Hospital/Clinic name">
+                                </div>
+
+                                <div>
+                                    <label for="total_claim_amount"
+                                        class="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">
+                                        Claim Amount (₹) *
+                                    </label>
+                                    <input type="number" id="total_claim_amount" name="total_claim_amount" required
+                                        class="w-full px-4 py-3 rounded-lg border-2 border-gray-200 dark:border-gray-600 dark:bg-gray-700 dark:text-white focus:border-blue-500 focus:ring-2 focus:ring-blue-200 transition-all duration-200"
+                                        placeholder="0">
+                                </div>
+                            </div>
+
+                            <!-- Bill Upload Info -->
+                            <div
+                                class="bg-blue-50 dark:bg-blue-900/20 p-6 rounded-xl border-2 border-blue-100 dark:border-blue-800">
+                                <div class="flex items-start">
+                                    <svg class="w-6 h-6 text-blue-500 mr-3 mt-0.5 flex-shrink-0" fill="currentColor"
+                                        viewBox="0 0 20 20">
+                                        <path fill-rule="evenodd"
+                                            d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z"
+                                            clip-rule="evenodd" />
+                                    </svg>
+                                    <div>
+                                        <p class="text-sm font-semibold text-blue-800 dark:text-blue-300 mb-2">Make sure
+                                            your payment receipt includes:</p>
+                                        <ul
+                                            class="list-disc list-inside text-sm text-blue-700 dark:text-blue-400 space-y-1">
+                                            <li>The patient's name</li>
+                                            <li>Treatment date</li>
+                                            <li>Diagnosis</li>
+                                            <li>Breakdown of charges</li>
+                                        </ul>
+                                        <p class="text-sm text-blue-600 dark:text-blue-400 mt-3">Note: Some information
+                                            might be printed on the back of the receipt.</p>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- File Upload -->
+                            <div>
+                                <label for="medical_bill"
+                                    class="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">
+                                    Consultation Receipt (PDF) *
+                                </label>
+                                <div class="relative">
+                                    <input type="file" id="medical_bill" name="medical_bill" accept=".pdf" required
+                                        class="w-full px-4 py-3 rounded-lg border-2 border-dashed border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-white focus:border-blue-500 focus:ring-2 focus:ring-blue-200 transition-all duration-200 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100">
+                                </div>
+                            </div>
+
+                            <!-- Description -->
+                            <div>
+                                <label for="description"
+                                    class="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">
+                                    Additional Description
+                                </label>
+                                <textarea id="description" name="description" rows="3"
+                                    class="w-full px-4 py-3 rounded-lg border-2 border-gray-200 dark:border-gray-600 dark:bg-gray-700 dark:text-white focus:border-blue-500 focus:ring-2 focus:ring-blue-200 transition-all duration-200"
+                                    placeholder="Any additional information about the claim..."></textarea>
+                            </div>
+                        </div>
+
+                        <!-- Submit Button -->
+                        <div
+                            class="bg-gray-50 dark:bg-gray-900 px-8 py-6 border-t border-gray-200 dark:border-gray-700">
+                            <button type="submit" id="submitBtn"
+                                class="w-full bg-gradient-to-r from-blue-500 to-blue-600 hover:from-blue-600 hover:to-blue-700 text-white font-semibold py-4 px-6 rounded-xl shadow-lg hover:shadow-xl transform hover:scale-[1.02] transition-all duration-200 flex items-center justify-center">
+                                <span id="submitText">Submit Claim</span>
+                                <svg id="submitIcon" class="w-5 h-5 ml-2" fill="none" stroke="currentColor"
+                                    viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                        d="M13 7l5 5m0 0l-5 5m5-5H6" />
+                                </svg>
+                            </button>
+                        </div>
+                    </form>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Loading Modal -->
+    <div id="loadingModal"
+        class="hidden fixed inset-0 bg-black bg-opacity-50 backdrop-blur-sm z-50 flex items-center justify-center">
+        <div class="bg-white dark:bg-gray-800 rounded-2xl p-8 max-w-md w-full mx-4 shadow-2xl">
+            <div class="text-center">
+                <div class="spinner mx-auto mb-6"></div>
+                <h3 class="text-2xl font-bold text-gray-900 dark:text-white mb-2">Processing Your Claim</h3>
+                <p class="text-gray-600 dark:text-gray-400 mb-4" id="loadingMessage">Analyzing documents with AI...</p>
+                <div class="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-2 overflow-hidden">
+                    <div class="bg-gradient-to-r from-blue-500 to-purple-500 h-full rounded-full animate-pulse"
+                        style="width: 60%"></div>
+                </div>
+                <p class="text-sm text-gray-500 dark:text-gray-400 mt-4">This may take a moment. Please don't close this
+                    window.</p>
+            </div>
+        </div>
+    </div>
+
+    <!-- Result Modal -->
+    <div id="resultModal" class="hidden fixed inset-0 bg-black bg-opacity-50 backdrop-blur-sm z-50 overflow-y-auto">
+        <div class="flex min-h-screen items-center justify-center p-4">
+            <div class="bg-white dark:bg-gray-800 rounded-2xl max-w-4xl w-full shadow-2xl transform transition-all">
+                <div class="p-8">
+                    <div class="flex justify-between items-start mb-6">
+                        <h2 class="text-3xl font-bold text-gray-900 dark:text-white">Claim Processing Result</h2>
+                        <button onclick="closeResultModal()"
+                            class="text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 transition-colors">
+                            <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                    d="M6 18L18 6M6 6l12 12" />
+                            </svg>
+                        </button>
+                    </div>
+
+                    <!-- Claim Details -->
+                    <div class="bg-gray-50 dark:bg-gray-900 rounded-xl p-6 mb-6">
+                        <h3 class="text-lg font-semibold text-gray-900 dark:text-white mb-4">Submitted Information</h3>
+                        <div class="grid grid-cols-2 gap-4 text-sm">
+                            <div>
+                                <span class="text-gray-600 dark:text-gray-400">Patient:</span>
+                                <span class="font-medium text-gray-900 dark:text-white ml-2" id="resultName"></span>
+                            </div>
+                            <div>
+                                <span class="text-gray-600 dark:text-gray-400">Claim Type:</span>
+                                <span class="font-medium text-gray-900 dark:text-white ml-2"
+                                    id="resultClaimType"></span>
+                            </div>
+                            <div>
+                                <span class="text-gray-600 dark:text-gray-400">Amount:</span>
+                                <span class="font-medium text-gray-900 dark:text-white ml-2" id="resultAmount"></span>
+                            </div>
+                            <div>
+                                <span class="text-gray-600 dark:text-gray-400">Facility:</span>
+                                <span class="font-medium text-gray-900 dark:text-white ml-2" id="resultFacility"></span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- AI Analysis Result -->
+                    <div class="prose dark:prose-invert max-w-none mb-6" id="resultOutput">
+                        <!-- Result will be inserted here -->
+                    </div>
+
+                    <!-- Action Buttons -->
+                    <div class="flex gap-4">
+                        <button onclick="closeResultModal()"
+                            class="flex-1 bg-blue-500 hover:bg-blue-600 text-white font-semibold py-3 px-6 rounded-xl transition-all duration-200">
+                            Submit Another Claim
+                        </button>
+                        <button onclick="window.print()"
+                            class="flex-1 border-2 border-gray-300 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-700 text-gray-700 dark:text-gray-300 font-semibold py-3 px-6 rounded-xl transition-all duration-200">
+                            Print Report
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Error Toast -->
+    <div id="errorToast"
+        class="hidden fixed bottom-4 right-4 z-50 bg-red-500 text-white px-6 py-4 rounded-xl shadow-2xl transform transition-all duration-300 max-w-md">
+        <div class="flex items-start gap-3">
+            <svg class="w-6 h-6 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
+                <path fill-rule="evenodd"
+                    d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z"
+                    clip-rule="evenodd" />
+            </svg>
+            <div>
+                <p class="font-semibold">Error</p>
+                <p id="errorMessage" class="text-sm opacity-90"></p>
+            </div>
+            <button onclick="hideError()" class="ml-auto text-white hover:text-red-100">
+                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+                </svg>
+            </button>
+        </div>
+    </div>
+
+    <script>
+        // Error toast functions
+        function showError(message) {
+            const toast = document.getElementById('errorToast');
+            document.getElementById('errorMessage').textContent = message;
+            toast.classList.remove('hidden');
+            setTimeout(() => hideError(), 5000);
+        }
+
+        function hideError() {
+            document.getElementById('errorToast').classList.add('hidden');
+        }
+
+        // Dark mode toggle
+        function toggleDarkMode() {
+            document.documentElement.classList.toggle('dark');
+            localStorage.setItem('darkMode', document.documentElement.classList.contains('dark'));
+        }
+
+        // Load dark mode preference
+        if (localStorage.getItem('darkMode') === 'true') {
+            document.documentElement.classList.add('dark');
+        }
+
+        // Form submission
+        document.getElementById('claimForm').addEventListener('submit', async function (e) {
+            e.preventDefault();
+
+            const loadingModal = document.getElementById('loadingModal');
+            const loadingMessage = document.getElementById('loadingMessage');
+            const submitBtn = document.getElementById('submitBtn');
+
+            // Show loading modal
+            loadingModal.classList.remove('hidden');
+            submitBtn.disabled = true;
+
+            // Simulate progress messages
+            const messages = [
+                'Extracting information from medical bill...',
+                'Analyzing claim details...',
+                'Checking policy compliance...',
+                'Verifying exclusions...',
+                'Generating final report...'
+            ];
+
+            let messageIndex = 0;
+            const messageInterval = setInterval(() => {
+                if (messageIndex < messages.length) {
+                    loadingMessage.textContent = messages[messageIndex];
+                    messageIndex++;
+                }
+            }, 2000);
+
+            try {
+                const formData = new FormData(this);
+
+                // Use AbortController with 5-minute timeout to prevent browser timeout
+                const controller = new AbortController();
+                const timeoutId = setTimeout(() => controller.abort(), 300000); // 5 minutes
+
+                const response = await fetch('/process_claim', {
+                    method: 'POST',
+                    body: formData,
+                    signal: controller.signal
+                });
+
+                clearTimeout(timeoutId);
+                clearInterval(messageInterval);
+
+                const result = await response.json();
+
+                loadingModal.classList.add('hidden');
+
+                if (result.error) {
+                    showError(result.message);
+                    submitBtn.disabled = false;
+                    return;
+                }
+
+                // Show result modal
+                document.getElementById('resultName').textContent = result.claim_data.name;
+                document.getElementById('resultClaimType').textContent = result.claim_data.claim_type;
+                document.getElementById('resultAmount').textContent = '₹' + result.claim_data.total_claim_amount;
+                document.getElementById('resultFacility').textContent = result.claim_data.medical_facility || 'N/A';
+                document.getElementById('resultOutput').innerHTML = result.output;
+                document.getElementById('resultModal').classList.remove('hidden');
+
+                submitBtn.disabled = false;
+
+            } catch (error) {
+                clearInterval(messageInterval);
+                loadingModal.classList.add('hidden');
+                if (error.name === 'AbortError') {
+                    showError('Request timed out. The AI model is taking too long. Please try again.');
+                } else {
+                    showError('An error occurred: ' + error.message);
+                }
+                submitBtn.disabled = false;
+            }
+        });
+
+        function closeResultModal() {
+            document.getElementById('resultModal').classList.add('hidden');
+            document.getElementById('claimForm').reset();
+        }
+
+        // Check Ollama status periodically
+        async function checkOllamaStatus() {
+            try {
+                const response = await fetch('/check_status');
+                const data = await response.json();
+                // You can add UI indicators here if needed
+            } catch (error) {
+                console.error('Status check failed:', error);
+            }
+        }
+
+        // Check status every 30 seconds
+        setInterval(checkOllamaStatus, 30000);
+    </script>
+</body>
+
+</html>

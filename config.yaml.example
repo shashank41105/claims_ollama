@@ -1,0 +1,85 @@
+# ClaimTrackr Configuration File
+# Customize these settings according to your needs
+
+# Ollama Configuration
+ollama:
+  base_url: "http://localhost:11434"
+  main_model: "llama3.1"        # For complex analysis
+  fast_model: "llama3.2"        # For quick extractions
+  embedding_model: "nomic-embed-text"  # For document embeddings
+  timeout: 120                   # Timeout in seconds
+
+# Flask Configuration
+flask:
+  host: "0.0.0.0"
+  port: 8081
+  debug: true
+  secret_key: "change-this-to-a-random-secret-key"
+
+# Document Processing
+documents:
+  folder: "documents"
+  allowed_extensions: [".pdf"]
+  max_file_size_mb: 10
+
+# FAISS Configuration
+faiss:
+  index_path: "faiss_index"
+  chunk_size: 1000
+  chunk_overlap: 200
+
+# Claim Processing
+claims:
+  # General exclusions list
+  exclusions:
+    - "HIV/AIDS"
+    - "Parkinson's disease"
+    - "Alzheimer's disease"
+    - "pregnancy"
+    - "substance abuse"
+    - "self-inflicted injuries"
+    - "sexually transmitted diseases(std)"
+    - "pre-existing conditions"
+  
+  # Similarity threshold for exclusion matching (0.0-1.0)
+  exclusion_threshold: 0.4
+  
+  # Maximum processing time in seconds
+  max_processing_time: 300
+
+# LLM Configuration
+llm:
+  temperature: 0.3              # Lower = more deterministic
+  max_tokens: 2500
+  
+# UI Configuration
+ui:
+  theme: "light"                # light or dark
+  show_status_banner: true
+  auto_refresh_status: true
+  refresh_interval: 30000       # milliseconds
+
+# Logging
+logging:
+  level: "INFO"                 # DEBUG, INFO, WARNING, ERROR
+  format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+  file: "claimtrackr.log"
+  max_size_mb: 10
+  backup_count: 5
+
+# Security
+security:
+  max_upload_size_mb: 10
+  allowed_file_types: [".pdf"]
+  sanitize_filenames: true
+  
+# Performance
+performance:
+  cache_embeddings: true
+  cache_ttl: 3600               # seconds
+  max_concurrent_requests: 5
+
+# Notes:
+# - Restart the application after changing configuration
+# - Keep sensitive information secure
+# - Backup this file before making changes

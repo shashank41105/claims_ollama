@@ -499,123 +499,332 @@
     </div>
 
     <script>
-        // Error toast functions
+        // ── Error Toast ────────────────────────────────────────────────
         function showError(message) {
             const toast = document.getElementById('errorToast');
             document.getElementById('errorMessage').textContent = message;
             toast.classList.remove('hidden');
-            setTimeout(() => hideError(), 5000);
+            setTimeout(() => hideError(), 7000);
         }
 
         function hideError() {
             document.getElementById('errorToast').classList.add('hidden');
         }
 
-        // Dark mode toggle
+        // ── Dark Mode ─────────────────────────────────────────────────
         function toggleDarkMode() {
             document.documentElement.classList.toggle('dark');
             localStorage.setItem('darkMode', document.documentElement.classList.contains('dark'));
         }
-
-        // Load dark mode preference
         if (localStorage.getItem('darkMode') === 'true') {
             document.documentElement.classList.add('dark');
         }
 
-        // Form submission
+        // ── Form Submission with SSE ──────────────────────────────────
         document.getElementById('claimForm').addEventListener('submit', async function (e) {
             e.preventDefault();
 
             const loadingModal = document.getElementById('loadingModal');
             const loadingMessage = document.getElementById('loadingMessage');
             const submitBtn = document.getElementById('submitBtn');
+            const progressBar = document.querySelector('#loadingModal .bg-gradient-to-r');
 
-            // Show loading modal
+            // Show loading & disable button
             loadingModal.classList.remove('hidden');
             submitBtn.disabled = true;
+            loadingMessage.textContent = 'Submitting claim...';
+            progressBar.style.width = '10%';
+            progressBar.classList.remove('animate-pulse');
+            progressBar.style.transition = 'width 0.5s ease';
 
-            // Simulate progress messages
-            const messages = [
-                'Extracting information from medical bill...',
-                'Analyzing claim details...',
-                'Checking policy compliance...',
-                'Verifying exclusions...',
-                'Generating final report...'
-            ];
+            // Collect form data
+            const formData = new FormData(this);
 
-            let messageIndex = 0;
-            const messageInterval = setInterval(() => {
-                if (messageIndex < messages.length) {
-                    loadingMessage.textContent = messages[messageIndex];
-                    messageIndex++;
-                }
-            }, 2000);
+            // Store claim info for the result modal
+            const claimInfo = {
+                name: formData.get('name') || '',
+                claim_type: formData.get('claim_type') || '',
+                total_claim_amount: formData.get('total_claim_amount') || '0',
+                medical_facility: formData.get('medical_facility') || 'N/A',
+            };
+
+            // Collected results from SSE stages
+            let decisionData = null;
+            let fraudData = null;
 
             try {
-                const formData = new FormData(this);
+                const xhr = new XMLHttpRequest();
+                xhr.open('POST', '/process_claim', true);
 
-                // Use AbortController with 5-minute timeout to prevent browser timeout
-                const controller = new AbortController();
-                const timeoutId = setTimeout(() => controller.abort(), 300000); // 5 minutes
+                // Stream timeout: 10 minutes
+                xhr.timeout = 600000;
 
-                const response = await fetch('/process_claim', {
-                    method: 'POST',
-                    body: formData,
-                    signal: controller.signal
-                });
+                let buffer = '';
 
-                clearTimeout(timeoutId);
-                clearInterval(messageInterval);
+                xhr.onprogress = function () {
+                    buffer += xhr.responseText.substring(buffer.length);
+                    const lines = buffer.split('\n');
 
-                const result = await response.json();
+                    for (const line of lines) {
+                        if (!line.startsWith('data: ')) continue;
+                        try {
+                            const payload = JSON.parse(line.substring(6));
+                            handleSSEEvent(payload, loadingMessage, progressBar);
 
-                loadingModal.classList.add('hidden');
+                            if (payload.stage === 'decision') {
+                                decisionData = payload.decision;
+                                fraudData = payload.fraud_report;
+                            }
 
-                if (result.error) {
-                    showError(result.message);
+                            if (payload.stage === 'error') {
+                                throw new Error(payload.message);
+                            }
+
+                            if (payload.stage === 'complete') {
+                                loadingModal.classList.add('hidden');
+                                showResultModal(claimInfo, decisionData, fraudData);
+                                submitBtn.disabled = false;
+                            }
+                        } catch (parseErr) {
+                            // Incomplete JSON line — wait for more data
+                        }
+                    }
+                };
+
+                xhr.onerror = function () {
+                    loadingModal.classList.add('hidden');
+                    showError('Network error. Check your connection and Ollama status.');
                     submitBtn.disabled = false;
-                    return;
-                }
+                };
 
-                // Show result modal
-                document.getElementById('resultName').textContent = result.claim_data.name;
-                document.getElementById('resultClaimType').textContent = result.claim_data.claim_type;
-                document.getElementById('resultAmount').textContent = '₹' + result.claim_data.total_claim_amount;
-                document.getElementById('resultFacility').textContent = result.claim_data.medical_facility || 'N/A';
-                document.getElementById('resultOutput').innerHTML = result.output;
-                document.getElementById('resultModal').classList.remove('hidden');
+                xhr.ontimeout = function () {
+                    loadingModal.classList.add('hidden');
+                    showError('Request timed out. The AI model is taking too long.');
+                    submitBtn.disabled = false;
+                };
 
-                submitBtn.disabled = false;
+                xhr.onload = function () {
+                    // If we got a non-SSE JSON error response (e.g. 400/503)
+                    if (xhr.status !== 200) {
+                        loadingModal.classList.add('hidden');
+                        try {
+                            const errResp = JSON.parse(xhr.responseText);
+                            showError(errResp.message || 'Server error');
+                        } catch {
+                            showError(`Server returned status ${xhr.status}`);
+                        }
+                        submitBtn.disabled = false;
+                    }
+                };
+
+                xhr.send(formData);
 
             } catch (error) {
-                clearInterval(messageInterval);
                 loadingModal.classList.add('hidden');
-                if (error.name === 'AbortError') {
-                    showError('Request timed out. The AI model is taking too long. Please try again.');
-                } else {
-                    showError('An error occurred: ' + error.message);
-                }
+                showError('An error occurred: ' + error.message);
                 submitBtn.disabled = false;
             }
         });
 
+        // ── Handle individual SSE events ──────────────────────────────
+        function handleSSEEvent(payload, messageEl, progressEl) {
+            const stageMessages = {
+                'bill_extracted': '📄 Medical bill analyzed',
+                'fraud_complete': '🔍 Fraud analysis complete',
+                'context_retrieved': '📋 Policy context loaded',
+                'generating': '🤖 AI is making decision...',
+                'decision': '✅ Decision rendered',
+                'complete': '🎉 Processing complete!',
+            };
+
+            if (stageMessages[payload.stage]) {
+                messageEl.textContent = stageMessages[payload.stage];
+            }
+            if (payload.progress) {
+                progressEl.style.width = payload.progress + '%';
+            }
+        }
+
+        // ── Render result modal from structured JSON ──────────────────
+        function showResultModal(claimInfo, decision, fraud) {
+            document.getElementById('resultName').textContent = claimInfo.name;
+            document.getElementById('resultClaimType').textContent = claimInfo.claim_type;
+            document.getElementById('resultAmount').textContent = '₹' + claimInfo.total_claim_amount;
+            document.getElementById('resultFacility').textContent = claimInfo.medical_facility;
+
+            const outputEl = document.getElementById('resultOutput');
+            outputEl.innerHTML = buildDecisionHTML(decision, fraud);
+
+            document.getElementById('resultModal').classList.remove('hidden');
+        }
+
+        // ── FIX #13: XSS ESCAPE FUNCTION ──────────────────────────────
+        function escapeHtml(text) {
+            if (text === null || text === undefined) {
+                return '';
+            }
+            const map = {
+                '&': '&amp;',
+                '<': '&lt;',
+                '>': '&gt;',
+                '"': '&quot;',
+                "'": '&#039;'
+            };
+            return String(text).replace(/[&<>"']/g, m => map[m]);
+        }
+
+        // ── FIX #13: XSS-SAFE HTML BUILDER ─────────────────────────────
+        function buildDecisionHTML(decision, fraud) {
+            if (!decision) {
+                return '<p class="text-gray-500">No decision data available.</p>';
+            }
+
+            const isAccepted = decision.status === 'ACCEPTED';
+            const statusColor = isAccepted ? 'text-green-600' : 'text-red-600';
+            const statusBg = isAccepted
+                ? 'bg-green-50 dark:bg-green-900/20'
+                : 'bg-red-50 dark:bg-red-900/20';
+
+            // Risk color determination
+            let riskColor = 'text-gray-500';
+            if (fraud) {
+                if (fraud.fraud_risk_level === 'LOW') riskColor = 'text-green-600';
+                else if (fraud.fraud_risk_level === 'MEDIUM') riskColor = 'text-yellow-600';
+                else if (fraud.fraud_risk_level === 'HIGH') riskColor = 'text-red-600';
+            }
+
+            // Escape all dynamic values
+            const escaped = {
+                status: escapeHtml(decision.status),
+                primaryReason: escapeHtml(decision.primary_reason),
+                fraudRiskLevel: fraud ? escapeHtml(fraud.fraud_risk_level) : 'N/A',
+                riskScore: fraud ? escapeHtml(fraud.risk_score) : 'N/A',
+                confidence: escapeHtml(decision.confidence),
+                approvedAmount: escapeHtml(decision.approved_amount),
+                policyReference: escapeHtml(decision.policy_reference),
+                medicalAssessment: escapeHtml(decision.medical_assessment),
+                riskAssessment: escapeHtml(decision.risk_assessment),
+                customerMessage: escapeHtml(decision.customer_message),
+            };
+
+            let html = `
+                <div class="${statusBg} p-6 rounded-xl mb-6">
+                    <h2 class="text-3xl font-bold ${statusColor} mb-2">
+                        CLAIM ${escaped.status}
+                    </h2>
+                    <p class="text-gray-700 dark:text-gray-300">
+                        ${escaped.primaryReason}
+                    </p>
+                </div>
+
+                <div class="grid grid-cols-2 gap-4 mb-6 bg-gray-100 dark:bg-gray-800 p-4 rounded-xl text-sm">
+                    <div>
+                        <span class="font-medium text-gray-600 dark:text-gray-400">Fraud Risk:</span>
+                        <span class="ml-2 font-semibold ${riskColor}">
+                            ${escaped.fraudRiskLevel} ${fraud ? '(' + escaped.riskScore + '/10)' : ''}
+                        </span>
+                    </div>
+                    <div>
+                        <span class="font-medium text-gray-600 dark:text-gray-400">Confidence:</span>
+                        <span class="ml-2 font-semibold text-gray-800 dark:text-gray-200">${escaped.confidence}</span>
+                    </div>
+                </div>
+            `;
+
+            // Approved amount or rejection details
+            if (isAccepted) {
+                html += `
+                    <div class="bg-green-50 dark:bg-green-900/20 p-6 rounded-xl mb-6">
+                        <h3 class="text-xl font-semibold text-green-800 dark:text-green-300 mb-3">Approved Amount</h3>
+                        <p class="text-3xl font-bold text-green-700 dark:text-green-400">
+                            ₹${escaped.approvedAmount || 0}
+                        </p>
+                    </div>
+                `;
+            } else {
+                html += `
+                    <div class="bg-red-50 dark:bg-red-900/20 p-6 rounded-xl mb-6">
+                        <h3 class="text-xl font-semibold text-red-800 dark:text-red-300 mb-3">Rejection Reason</h3>
+                        <p class="text-gray-700 dark:text-gray-300">${escaped.primaryReason}</p>
+                        <p class="text-sm text-gray-500 dark:text-gray-400 mt-2">
+                            Policy Reference: ${escaped.policyReference}
+                        </p>
+                    </div>
+                `;
+            }
+
+            // Risk factors
+            if (fraud && fraud.risk_factors && fraud.risk_factors.length > 0) {
+                html += `
+                    <div class="bg-orange-50 dark:bg-orange-900/20 p-6 rounded-xl mb-6">
+                        <h3 class="text-lg font-semibold text-orange-800 dark:text-orange-300 mb-3">Fraud Detection Details</h3>
+                        <ul class="list-disc list-inside space-y-1 text-gray-700 dark:text-gray-300 text-sm">
+                            ${fraud.risk_factors.map(f => `<li>${escapeHtml(f)}</li>`).join('')}
+                        </ul>
+                    </div>
+                `;
+            }
+
+            // Medical assessment
+            if (escaped.medicalAssessment) {
+                html += `
+                    <div class="bg-white dark:bg-gray-800 p-6 rounded-xl mb-6 border border-gray-200 dark:border-gray-700">
+                        <h3 class="text-lg font-semibold text-gray-900 dark:text-white mb-3">Medical Assessment</h3>
+                        <p class="text-gray-700 dark:text-gray-300">${escaped.medicalAssessment}</p>
+                    </div>
+                `;
+            }
+
+            // Risk assessment
+            if (escaped.riskAssessment) {
+                html += `
+                    <div class="bg-gray-50 dark:bg-gray-800 p-6 rounded-xl mb-6 border border-gray-200 dark:border-gray-700">
+                        <h3 class="text-lg font-semibold text-gray-900 dark:text-white mb-3">Risk Assessment</h3>
+                        <p class="text-gray-700 dark:text-gray-300">${escaped.riskAssessment}</p>
+                    </div>
+                `;
+            }
+
+            // Customer communication
+            if (escaped.customerMessage) {
+                html += `
+                    <div class="bg-blue-50 dark:bg-blue-900/20 p-6 rounded-xl mb-6">
+                        <h3 class="text-lg font-semibold text-blue-800 dark:text-blue-300 mb-2">Customer Communication</h3>
+                        <p class="italic text-gray-700 dark:text-gray-300">"${escaped.customerMessage}"</p>
+                    </div>
+                `;
+            }
+
+            // Next steps
+            if (decision.next_steps && decision.next_steps.length > 0) {
+                html += `
+                    <div class="bg-blue-50 dark:bg-blue-900/20 p-4 rounded-xl">
+                        <h3 class="text-lg font-semibold text-blue-800 dark:text-blue-300 mb-2">Next Steps</h3>
+                        <ul class="list-disc list-inside space-y-1 text-gray-700 dark:text-gray-300 text-sm">
+                            ${decision.next_steps.map(s => `<li>${escapeHtml(s)}</li>`).join('')}
+                        </ul>
+                    </div>
+                `;
+            }
+
+            return html;
+        }
+
+        // ── Close result modal ────────────────────────────────────────
         function closeResultModal() {
             document.getElementById('resultModal').classList.add('hidden');
             document.getElementById('claimForm').reset();
         }
 
-        // Check Ollama status periodically
+        // ── Periodic Ollama status check ──────────────────────────────
         async function checkOllamaStatus() {
             try {
                 const response = await fetch('/check_status');
                 const data = await response.json();
-                // You can add UI indicators here if needed
             } catch (error) {
                 console.error('Status check failed:', error);
             }
         }
-
-        // Check status every 30 seconds
         setInterval(checkOllamaStatus, 30000);
     </script>
 </body>

@@ -1,11 +1,15 @@
 # Core Dependencies
 flask==3.0.0
 werkzeug==3.0.1
+flask-cors==4.0.0
 
 # LangChain and Ollama
 langchain==0.1.0
 langchain-community==0.0.13
 langchain-core==0.1.10
+
+# Ollama Python SDK
+ollama>=0.1.0
 
 # PDF Processing
 PyPDF2==3.0.1
@@ -21,14 +25,13 @@ numpy==1.26.2
 # Vector Database
 faiss-cpu==1.7.4
 
+# SQLite vector extension
+sqlite-vec>=0.1.1
+
 # Utilities
 pyyaml==6.0.1
 requests==2.31.0
 python-dotenv==1.0.0
-
-# Image Processing (optional, for OCR if needed)
-# easyocr==1.7.0
-# opencv-python==4.8.1.78
 
 # Note: Ollama must be installed separately on your system
 # Visit https://ollama.ai for installation instructions

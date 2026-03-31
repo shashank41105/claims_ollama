@@ -11,6 +11,7 @@ import sqlite3
 import logging
 import threading
 import tempfile
+import base64
 import magic  # NEW: pip install python-magic-bin (Windows) or python-magic (Linux/Mac)
 from contextlib import contextmanager
 from datetime import datetime, timedelta
@@ -18,7 +19,7 @@ from decimal import Decimal, ROUND_HALF_UP
 from pathlib import Path
 import io
 
-from flask import Flask, render_template, request, jsonify, Response
+from flask import Flask, render_template, request, jsonify, Response, send_from_directory
 from flask_cors import CORS
 from flask_limiter import Limiter  # NEW: pip install flask-limiter
 from flask_limiter.util import get_remote_address
@@ -133,48 +134,55 @@ def serialize_f32(vector):
 # OCR & FILE HANDLING (FIXED)
 # ============================================================================
 
-def get_file_content(file) -> str:
+def get_file_content(file_path: str) -> str:
     """
-    FIXED: Extract text from PDF - digital OR scanned with OCR.
-    Bug fix: convert_from_path needs file path, not BytesIO.
+    FIXED: Extract text from PDF or Image.
+    Uses Vision AI (llama3.2-vision) for images, falls back to PyPDF/OCR for PDFs.
     """
     text = ""
-    temp_path = None
     
     try:
-        if not file.filename.endswith(".pdf"):
-            return ""
+        mime = magic.from_file(file_path, mime=True)
         
-        # Try 1: Digital text extraction (fast)
-        pdf = PdfReader(file)
-        for page in pdf.pages:
-            page_text = page.extract_text()
-            if page_text:
-                text += page_text + "\n"
-        
-        # Try 2: OCR for scanned PDFs
-        if not text.strip() and OCR_AVAILABLE:
-            logger.info("No digital text found, attempting OCR...")
-            
-            # FIXED: Save to temp file first (pdf2image needs file path)
-            file.seek(0)
-            with tempfile.NamedTemporaryFile(delete=False, suffix='.pdf') as tmp:
-                tmp.write(file.read())
-                temp_path = tmp.name
-            
-            try:
-                images = convert_from_path(temp_path)  # FIXED: Now uses file path
-                for i, image in enumerate(images):
-                    page_text = pytesseract.image_to_string(image)
-                    text += page_text + "\n"
-                    logger.info(f"OCR page {i+1}: {len(page_text)} chars")
+        # If it's an image, directly use Vision model
+        if mime in ['image/jpeg', 'image/png']:
+            logger.info("Image detected, attempting Vision AI extraction...")
+            vision_text = extract_text_with_vision(file_path)
+            if vision_text:
+                return vision_text.strip()
                 
-                if text.strip():
-                    logger.info(f"OCR successful: {len(text)} chars total")
-                else:
-                    logger.warning("OCR found no text")
-            except Exception as ocr_err:
-                logger.error(f"OCR failed: {ocr_err}")
+        # If it's a PDF, try digital text first
+        if mime == 'application/pdf':
+            with open(file_path, "rb") as f:
+                pdf = PdfReader(f)
+                for page in pdf.pages:
+                    page_text = page.extract_text()
+                    if page_text:
+                        text += page_text + "\n"
+                        
+            # If no digital text, try OCR (Tesseract) or convert to image for Vision
+            if not text.strip() and OCR_AVAILABLE:
+                logger.info("No digital text found, attempting OCR...")
+                try:
+                    images = convert_from_path(file_path)
+                    
+                    # Try to use vision model on the first page as a fallback check
+                    if images:
+                        with tempfile.NamedTemporaryFile(suffix='.jpg', delete=False) as tmp:
+                            images[0].save(tmp.name, 'JPEG')
+                            vision_fallback = extract_text_with_vision(tmp.name)
+                            if vision_fallback:
+                                text += vision_fallback + "\n"
+                                logger.info("Vision AI fallback successful on PDF")
+                            os.unlink(tmp.name)
+                            
+                    # Tesseract loop for all pages
+                    if not text.strip():
+                        for i, image in enumerate(images):
+                            page_text = pytesseract.image_to_string(image)
+                            text += page_text + "\n"
+                except Exception as ocr_err:
+                    logger.error(f"OCR/Vision fallback failed: {ocr_err}")
         
         elif not text.strip() and not OCR_AVAILABLE:
             logger.warning("No digital text found and OCR not available")
@@ -189,6 +197,30 @@ def get_file_content(file) -> str:
     return text.strip()
 
 
+def extract_text_with_vision(image_path: str) -> str:
+    """Use llama3.2-vision to extract and analyze text from an image."""
+    try:
+        with open(image_path, "rb") as image_file:
+            encoded_string = base64.b64encode(image_file.read()).decode("utf-8")
+        
+        logger.info(f"Analyzing {image_path} with llama3.2-vision...")
+        response = chat(
+            model="llama3.2-vision",
+            messages=[
+                {
+                    "role": "user",
+                    "content": "Extract all text from this medical bill/receipt. Pay special attention to handwritten notes, doctor stamps, the disease name, dates, and amounts. Return the clear, transcribed text.",
+                    "images": [encoded_string]
+                }
+            ],
+            options={"temperature": 0.1}
+        )
+        return response.get("message", {}).get("content", "")
+    except Exception as e:
+        logger.error(f"Vision model extraction failed. Make sure 'llama3.2-vision' is pulled. Error: {e}")
+        return ""
+
+
 def validate_uploaded_file(file) -> tuple:
     """
     NEW: Comprehensive file validation with magic bytes.
@@ -198,8 +230,9 @@ def validate_uploaded_file(file) -> tuple:
         return False, "No file provided", None
     
     # Check 1: Extension
-    if not file.filename.lower().endswith('.pdf'):
-        return False, "Only PDF files are accepted", None
+    ext = file.filename.lower().split('.')[-1]
+    if ext not in ['pdf', 'jpg', 'jpeg', 'png']:
+        return False, "Only PDF or Image (JPG/PNG) files are accepted", None
     
     # Check 2: File size
     file.seek(0, 2)
@@ -218,18 +251,19 @@ def validate_uploaded_file(file) -> tuple:
         file.seek(0)
         
         mime = magic.from_buffer(file_header, mime=True)
-        if mime != 'application/pdf':
-            return False, f"File is not a valid PDF (detected: {mime})", None
+        if mime not in ['application/pdf', 'image/jpeg', 'image/png']:
+            return False, f"File is not a valid PDF or Image (detected: {mime})", None
         
-        # Check 4: PDF structure
-        pdf = PdfReader(file)
-        file.seek(0)
-        
-        if len(pdf.pages) == 0:
-            return False, "PDF has no pages", None
-        
-        if len(pdf.pages) > 50:
-            return False, "PDF too large (max 50 pages)", None
+        # Check 4: PDF structure only if it is a pdf
+        if mime == 'application/pdf':
+            pdf = PdfReader(file)
+            file.seek(0)
+            
+            if len(pdf.pages) == 0:
+                return False, "PDF has no pages", None
+            
+            if len(pdf.pages) > 50:
+                return False, "PDF too large (max 50 pages)", None
             
     except Exception as e:
         return False, f"Corrupted PDF: {str(e)}", None
@@ -397,7 +431,7 @@ def extract_bill_info(bill_text: str) -> dict:
             messages=[
                 {
                     "role": "system",
-                    "content": "Extract disease and expense from medical bills. Return ONLY JSON: {\"disease\": \"name\", \"expense\": number}",
+                    "content": "Extract disease and expense from medical bills. Return ONLY JSON: {\"disease\": \"name\", \"expense\": number, \"icd10_code\": \"code\"}. Provide the standard ICD-10 code for the disease if possible.",
                 },
                 {
                     "role": "user",
@@ -412,7 +446,12 @@ def extract_bill_info(bill_text: str) -> dict:
             data = json.loads(match.group())
             if data.get("expense"):
                 try:
-                    data["expense"] = int(float(str(data["expense"]).replace(",", "").replace("₹", "").strip()))
+                    expense_str = str(data["expense"])
+                    expense_clean = re.sub(r'[^\d.]', '', expense_str)
+                    if expense_clean:
+                        data["expense"] = int(float(expense_clean))
+                    else:
+                        data["expense"] = None
                 except (ValueError, TypeError):
                     data["expense"] = None
             return data
@@ -448,10 +487,10 @@ def check_policy_violations(disease: str) -> list:
                 SELECT exclusion_id, distance
                 FROM exclusions_vec
                 WHERE embedding MATCH ?
-                AND k = 10
+                AND k = ?
                 ORDER BY distance
                 """,
-                (serialize_f32(disease_vec),),
+                (serialize_f32(disease_vec), 10,),
             )
             vec_rows = cursor.fetchall()
             
@@ -467,7 +506,7 @@ def check_policy_violations(disease: str) -> list:
                 distance = vec_row["distance"]
                 similarity = max(0, 1 - (distance ** 2) / 2) * 100
                 
-                if similarity > 40:
+                if similarity > 75:
                     violations.append({
                         "exclusion": excl_row["name"],
                         "similarity": round(similarity, 1),
@@ -521,10 +560,10 @@ def detect_duplicates(claim_data: dict, threshold: float = 0.7) -> list:
                 SELECT claim_id, distance
                 FROM claims_vec
                 WHERE diagnosis_embedding MATCH ?
-                AND k = 10
+                AND k = ?
                 ORDER BY distance
                 """,
-                (serialize_f32(diag_vec),),
+                (serialize_f32(diag_vec), 10,),
             )
             vec_rows = cursor.fetchall()
             
@@ -546,7 +585,7 @@ def detect_duplicates(claim_data: dict, threshold: float = 0.7) -> list:
                 diag_similarity = max(0, 1 - (distance ** 2) / 2)
                 
                 if diag_similarity > 0.7:
-                    score += 0.4
+                    score += 0.3
                     reasons.append(f"Similar diagnosis ({diag_similarity:.0%} match)")
                 
                 if claim_row["patient_name"] and claim_row["patient_name"].lower() == patient_name:
@@ -557,9 +596,9 @@ def detect_duplicates(claim_data: dict, threshold: float = 0.7) -> list:
                     hist_amt = Decimal(str(claim_row["amount"] or 0))
                     if claimed_amount > 0 and hist_amt > 0:
                         variance = abs(claimed_amount - hist_amt) / max(claimed_amount, hist_amt)
-                        if variance < Decimal('0.15'):
+                        if variance < Decimal('0.05'):
                             score += 0.2
-                            reasons.append(f"Similar amount ({float(variance):.0%} variance)")
+                            reasons.append(f"Near identical amount ({float(variance):.0%} variance)")
                 except (ValueError, TypeError):
                     pass
                 
@@ -569,16 +608,19 @@ def detect_duplicates(claim_data: dict, threshold: float = 0.7) -> list:
                         d1 = datetime.strptime(claim_date, "%Y-%m-%d")
                         d2 = datetime.strptime(claim_row["date"], "%Y-%m-%d")
                         days_apart = abs((d1 - d2).days)
-                        if days_apart < 30:
-                            score += 0.1
-                            reasons.append(f"Recent ({days_apart}d apart)")
+                        if days_apart == 0:
+                            score += 0.3
+                            reasons.append("Same date")
+                        elif days_apart < 30:
+                            score -= 0.1
+                            reasons.append(f"Likely follow-up ({days_apart}d apart)")
                 except (ValueError, TypeError):
                     pass
                 
                 if score >= threshold:
                     duplicates.append({
                         "claim_id": vec_row["claim_id"],
-                        "confidence": round(score * 100, 1),
+                        "confidence": min(100.0, round(score * 100, 1)),
                         "reasons": reasons,
                         "diagnosis": claim_row["diagnosis"],
                         "amount": claim_row["amount"],
@@ -588,6 +630,47 @@ def detect_duplicates(claim_data: dict, threshold: float = 0.7) -> list:
         logger.error(f"Duplicate detection error: {e}")
     
     return duplicates
+
+
+def detect_fraud_ring(claim_data: dict) -> list:
+    """Detect potential fraud rings by analyzing velocity and patterns from the same medical facility."""
+    facility = claim_data.get("medical_facility", "").strip()
+    if not facility or facility.lower() in ["unknown", "n/a", "none"]:
+        return []
+    
+    current_date_str = claim_data.get("date", datetime.now().strftime("%Y-%m-%d"))
+    current_amount = Decimal(str(claim_data.get("amount", 0) or 0))
+    
+    warnings = []
+    try:
+        with get_db() as conn:
+            cursor = conn.cursor()
+            
+            try:
+                current_date = datetime.strptime(current_date_str, "%Y-%m-%d")
+                seven_days_ago = (current_date - timedelta(days=7)).strftime("%Y-%m-%d")
+            except ValueError:
+                seven_days_ago = (datetime.now() - timedelta(days=7)).strftime("%Y-%m-%d")
+
+            cursor.execute(
+                """
+                SELECT id, amount, date FROM claims 
+                WHERE LOWER(medical_facility) = ? AND date >= ?
+                """, (facility.lower(), seven_days_ago)
+            )
+            recent_claims = cursor.fetchall()
+            
+            if len(recent_claims) >= 3: # 3 prior claims in 7 days is high velocity for tiny clinic
+                warnings.append(f"Fraud Ring Risk: High velocity ({len(recent_claims)} claims) from '{facility}' in last 7 days")
+                
+            identical_amounts = [c for c in recent_claims if abs(Decimal(str(c["amount"] or 0)) - current_amount) < Decimal('1.0')]
+            if len(identical_amounts) >= 2:
+                warnings.append(f"Fraud Ring Risk: {len(identical_amounts)} identical amount claims (₹{current_amount}) from '{facility}'")
+                
+    except Exception as e:
+        logger.error(f"Fraud ring detection error: {e}")
+        
+    return warnings
 
 
 def comprehensive_fraud_check(claim_data: dict, bill_info: dict) -> dict:
@@ -612,6 +695,11 @@ def comprehensive_fraud_check(claim_data: dict, bill_info: dict) -> dict:
         fraud_report["risk_factors"].append(
             f"Potential duplicate: {fraud_report['duplicate_confidence']:.1f}% similarity"
         )
+    
+    fraud_ring_warnings = detect_fraud_ring(claim_data)
+    if fraud_ring_warnings:
+        for warning in fraud_ring_warnings:
+            fraud_report["risk_factors"].append(warning)
     
     try:
         claimed = Decimal(str(claim_data.get("amount", 0) or 0))
@@ -657,6 +745,10 @@ def comprehensive_fraud_check(claim_data: dict, bill_info: dict) -> dict:
         risk_score += 3
     elif fraud_report["duplicate_confidence"] > 50:
         risk_score += 2
+        
+    if any("Fraud Ring Risk" in rf for rf in fraud_report["risk_factors"]):
+        risk_score += 4
+        
     if fraud_report["amount_anomaly"]:
         risk_score += 3
     if fraud_report["policy_violations"]:
@@ -722,17 +814,24 @@ Example matches:
 - "Plastic surgery for beauty" → REJECT (matches "cosmetic")
 
 ## STEP 2: Verify Amounts
-If claimed_amount > billed_amount:
+If claimed_amount > billed_amount and billed_amount > 0:
  - Calculate variance: (claimed - billed) / billed * 100
  - If variance > 10%: REJECT for "Amount discrepancy"
- - If billed_amount is 0 or unknown: REQUEST "Missing bill information"
+If billed_amount is 0 or unknown, proceed to STEP 3 and evaluate based on other risk factors without automatic rejection.
 
 ## STEP 3: Check Fraud Risk
 If fraud risk is HIGH AND multiple risk factors present:
  - Review risk factors carefully
  - If duplicate claim with >70% confidence: REJECT
+ - If "Fraud Ring Risk" is explicitly mentioned: REJECT
  - If amount anomaly + duplicate: REJECT
- - If only one weak indicator: ACCEPT with note
+ - If only one weak indicator: REQUIRES_REVIEW with note
+If fraud risk is MEDIUM:
+ - Output status: "REQUIRES_REVIEW"
+ - Set approved_amount to 0
+ - Explain why manual review is needed
+If fraud risk is LOW:
+ - Output status: "ACCEPTED" and calculate approved_amount
 
 ## STEP 4: Calculate Approved Amount (if not rejected)
 Base amount = MIN(claimed_amount, billed_amount)
@@ -754,7 +853,7 @@ Example:
 You MUST return ONLY valid JSON in this EXACT format (no markdown, no extra text):
 
 {{
- "status": "ACCEPTED" or "REJECTED",
+ "status": "ACCEPTED" or "REJECTED" or "REQUIRES_REVIEW",
  "approved_amount": <number or 0 if rejected>,
  "primary_reason": "<one clear sentence explaining decision>",
  "confidence": "HIGH" or "MEDIUM" or "LOW",
@@ -805,22 +904,21 @@ Output:
  ]
 }}
 
-Example 3 - Rejected (Fraud):
-Input: Fever, ₹15,000 claimed, ₹720 billed, HIGH risk (duplicate 87%, amount anomaly)
+Example 3 - Rejected (Fraud - Duplicate):
+Input: Fever, ₹1,035 claimed, ₹1,035 billed, HIGH risk (duplicate 95%)
 Output:
 {{
  "status": "REJECTED",
  "approved_amount": 0,
- "primary_reason": "Claim rejected due to significant discrepancies: amount claimed exceeds bill by 1983%, and duplicate claim detected with 87% similarity",
+ "primary_reason": "Claim rejected because a highly similar claim (95% match) was already submitted previously.",
  "confidence": "HIGH",
  "policy_reference": "Section 5, Fraud Prevention Policy",
- "risk_assessment": "Multiple fraud indicators: severe amount inflation and near-duplicate claim submitted 10 days ago. Requires investigation.",
- "customer_message": "Your claim has been flagged for review due to discrepancies in the submitted information. Our fraud investigation team will contact you within 3 business days. Please have your original documentation ready.",
- "medical_assessment": "Unable to verify medical necessity due to documentation inconsistencies.",
+ "risk_assessment": "Duplicate claim detected with 95% similarity. Flagged for review.",
+ "customer_message": "Your claim has been flagged as a potential duplicate. Our investigation team will contact you shortly.",
+ "medical_assessment": "Medical necessity is unverified due to suspected duplicate submission.",
  "next_steps": [
- "Fraud investigation team will contact you",
- "Prepare original bills and receipts for verification",
- "Claim will be reviewed manually within 5 business days"
+ "Provide original documentation for manual verification",
+ "Claim will be reviewed within 5 business days"
  ]
 }}
 
@@ -845,6 +943,7 @@ def process_claim_stream(claim_data: dict, bill_content: str, bill_info: dict, f
             "message": "Medical bill analyzed",
             "disease": bill_info.get("disease", "Unknown"),
             "expense": bill_info.get("expense"),
+            "icd10_code": bill_info.get("icd10_code", "Unknown"),
             "progress": 30,
         })
         
@@ -943,7 +1042,20 @@ def process_claim_stream(claim_data: dict, bill_content: str, bill_info: dict, f
 
 def _fallback_decision(llm_text: str, fraud_report: dict) -> dict:
     """Build a fallback decision if LLM doesn't return valid JSON."""
-    status = "REJECTED" if fraud_report["fraud_risk_level"] == "HIGH" else "ACCEPTED"
+    if llm_text and "ACCEPTED" in llm_text.upper():
+        status = "ACCEPTED"
+    elif llm_text and "REJECTED" in llm_text.upper():
+        status = "REJECTED"
+    elif llm_text and "REQUIRES_REVIEW" in llm_text.upper():
+        status = "REQUIRES_REVIEW"
+    else:
+        if fraud_report["fraud_risk_level"] == "HIGH":
+            status = "REJECTED"
+        elif fraud_report["fraud_risk_level"] == "MEDIUM":
+            status = "REQUIRES_REVIEW"
+        else:
+            status = "ACCEPTED"
+        
     return {
         "status": status,
         "approved_amount": 0,
@@ -992,8 +1104,8 @@ def save_claim(claim_data: dict, bill_info: dict, fraud_report: dict, decision: 
             cursor.execute(
                 """INSERT OR REPLACE INTO claims
                 (id, patient_name, diagnosis, amount, date, medical_facility,
-                claim_type, claim_reason, status, risk_level, risk_score, file_path)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                claim_type, claim_reason, status, risk_level, risk_score, file_path, icd10_code)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (
                     claim_id,
                     claim_data.get("patient_name", ""),
@@ -1007,6 +1119,7 @@ def save_claim(claim_data: dict, bill_info: dict, fraud_report: dict, decision: 
                     fraud_report.get("fraud_risk_level", ""),
                     fraud_report.get("risk_score", 0),
                     file_path,
+                    bill_info.get("icd10_code", ""),
                 ),
             )
             
@@ -1098,6 +1211,12 @@ def health_check():
     return jsonify(health), status_code
 
 
+@app.route('/uploads/<path:filename>')
+def download_file(filename):
+    """Serve uploaded PDF files for review."""
+    return send_from_directory(UPLOAD_DIR, filename)
+
+
 # ============================================================================
 # ADMIN UI ROUTES
 # ============================================================================
@@ -1113,6 +1232,76 @@ def admin_panel():
             return render_template("admin.html", exclusions=exclusions)
     except Exception as e:
         return f"Error: {e}", 500
+
+
+@app.route("/admin/api/stats")
+def admin_stats():
+    """API endpoint for dashboard real-time stats."""
+    try:
+        with get_db() as conn:
+            cursor = conn.cursor()
+            
+            cursor.execute("SELECT COUNT(*) FROM claims")
+            total_claims = cursor.fetchone()[0]
+            
+            cursor.execute("SELECT SUM(amount) FROM claims WHERE status = 'REJECTED'")
+            saved = cursor.fetchone()[0] or 0
+            
+            cursor.execute("SELECT status, COUNT(*) as count FROM claims GROUP BY status")
+            statuses = {row[0]: row[1] for row in cursor.fetchall()}
+            
+            cursor.execute("""
+                SELECT icd10_code, diagnosis, COUNT(*) as count 
+                FROM claims 
+                WHERE icd10_code IS NOT NULL AND icd10_code != '' AND icd10_code != 'Unknown' 
+                GROUP BY icd10_code 
+                ORDER BY count DESC LIMIT 5
+            """)
+            top_diseases = [{"code": row[0], "name": row[1], "count": row[2]} for row in cursor.fetchall()]
+            
+            return jsonify({
+                "total_claims": total_claims,
+                "amount_saved": saved,
+                "statuses": statuses,
+                "top_diseases": top_diseases
+            })
+    except Exception as e:
+        logger.error(f"Stats error: {e}")
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/admin/review")
+def admin_review():
+    """Admin dashboard for manual claim review."""
+    try:
+        with get_db() as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT * FROM claims WHERE status = 'REQUIRES_REVIEW' ORDER BY created_at DESC")
+            pending_claims = cursor.fetchall()
+            return render_template("admin_review.html", pending_claims=pending_claims)
+    except Exception as e:
+        return f"Error: {e}", 500
+
+
+@app.route("/admin/review/<claim_id>", methods=["POST"])
+def resolve_claim(claim_id):
+    """Resolve a claim pending review."""
+    try:
+        data = request.json
+        action = data.get("action")
+        if action not in ["ACCEPTED", "REJECTED"]:
+            return jsonify({"error": "Invalid action"}), 400
+            
+        with get_db() as conn:
+            cursor = conn.cursor()
+            cursor.execute("UPDATE claims SET status = ? WHERE id = ?", (action, claim_id))
+            conn.commit()
+            
+        logger.info(f"Admin resolved claim {claim_id} as {action}")
+        return jsonify({"success": True})
+    except Exception as e:
+        logger.error(f"Resolve claim error: {e}")
+        return jsonify({"error": str(e)}), 500
 
 
 @app.route("/admin/exclusions", methods=["POST"])
@@ -1233,19 +1422,21 @@ def process_claim():
             return jsonify({"error": True, "message": error_message}), 400
         
         medical_bill = request.files.get("medical_bill")
+        claim_data["id"] = f"CLM-{uuid.uuid4().hex[:12].upper()}"
         
-        # Extract bill text (with OCR if needed)
-        bill_content = get_file_content(medical_bill)
+        # FIX: Save file FIRST so Vision/OCR can read it directly from disk
+        file_path = save_uploaded_file(medical_bill, claim_data["id"], safe_filename)
+        
+        if not file_path:
+            return jsonify({"error": True, "message": "Failed to save file to disk."}), 500
+            
+        # Extract bill text (with Vision or OCR if needed)
+        bill_content = get_file_content(file_path)
         if not bill_content:
-            return jsonify({"error": True, "message": "Unable to read medical bill PDF (tried digital text and OCR)"}), 400
+            return jsonify({"error": True, "message": "Unable to read medical bill text. If this is an image, make sure llama3.2-vision is installed via Ollama."}), 400
         
         bill_info = extract_bill_info(bill_content)
-        
-        claim_data["id"] = f"CLM-{uuid.uuid4().hex[:12].upper()}"
         claim_data["diagnosis"] = bill_info.get("disease", claim_data.get("claim_reason", ""))
-        
-        # FIX: Save file HERE while request context is still open
-        file_path = save_uploaded_file(medical_bill, claim_data["id"], safe_filename)
         
         # Pass file_path (string) not file object to the stream
         return Response(
@@ -1286,6 +1477,20 @@ if __name__ == "__main__":
     print(" ✓ Comprehensive file validation (magic bytes)")
     print(" ✓ Improved LLM prompt with examples")
     print(" ✓ Rotating log files")
+    print(" ✓ ICD-10 Medical Coding Support")
+    
+    # Auto-migration for ICD-10 code
+    try:
+        with get_db() as conn:
+            cursor = conn.cursor()
+            cursor.execute("PRAGMA table_info(claims)")
+            columns = [col["name"] for col in cursor.fetchall()]
+            if "icd10_code" not in columns:
+                cursor.execute("ALTER TABLE claims ADD COLUMN icd10_code TEXT")
+                conn.commit()
+                print(" [MIGRATION] Added icd10_code column to claims table")
+    except Exception as e:
+        logger.error(f"Migration error: {e}")
     
     if os.path.exists(DB_PATH):
         print(f"\n[OK] Database found: {DB_PATH}")

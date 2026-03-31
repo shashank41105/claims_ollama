@@ -359,10 +359,10 @@
                             <div>
                                 <label for="medical_bill"
                                     class="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">
-                                    Consultation Receipt (PDF) *
+                                    Consultation Receipt (PDF or Image) *
                                 </label>
                                 <div class="relative">
-                                    <input type="file" id="medical_bill" name="medical_bill" accept=".pdf" required
+                                    <input type="file" id="medical_bill" name="medical_bill" accept=".pdf,.png,.jpg,.jpeg" required
                                         class="w-full px-4 py-3 rounded-lg border-2 border-dashed border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-white focus:border-blue-500 focus:ring-2 focus:ring-blue-200 transition-all duration-200 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100">
                                 </div>
                             </div>
@@ -452,6 +452,10 @@
                             <div>
                                 <span class="text-gray-600 dark:text-gray-400">Facility:</span>
                                 <span class="font-medium text-gray-900 dark:text-white ml-2" id="resultFacility"></span>
+                            </div>
+                            <div>
+                                <span class="text-gray-600 dark:text-gray-400">ICD-10 Code:</span>
+                                <span class="font-medium inline-flex items-center space-x-1 px-2 py-0.5 rounded text-xs font-medium bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-300 ml-2" id="resultICD10"></span>
                             </div>
                         </div>
                     </div>
@@ -571,6 +575,10 @@
                             const payload = JSON.parse(line.substring(6));
                             handleSSEEvent(payload, loadingMessage, progressBar);
 
+                            if (payload.stage === 'bill_extracted') {
+                                claimInfo.icd10_code = payload.icd10_code || 'N/A';
+                            }
+
                             if (payload.stage === 'decision') {
                                 decisionData = payload.decision;
                                 fraudData = payload.fraud_report;
@@ -651,6 +659,7 @@
             document.getElementById('resultClaimType').textContent = claimInfo.claim_type;
             document.getElementById('resultAmount').textContent = '₹' + claimInfo.total_claim_amount;
             document.getElementById('resultFacility').textContent = claimInfo.medical_facility;
+            document.getElementById('resultICD10').textContent = claimInfo.icd10_code || 'N/A';
 
             const outputEl = document.getElementById('resultOutput');
             outputEl.innerHTML = buildDecisionHTML(decision, fraud);
@@ -680,10 +689,19 @@
             }
 
             const isAccepted = decision.status === 'ACCEPTED';
-            const statusColor = isAccepted ? 'text-green-600' : 'text-red-600';
-            const statusBg = isAccepted
-                ? 'bg-green-50 dark:bg-green-900/20'
-                : 'bg-red-50 dark:bg-red-900/20';
+            const isReview = decision.status === 'REQUIRES_REVIEW';
+            
+            let statusColor, statusBg;
+            if (isAccepted) {
+                statusColor = 'text-green-600';
+                statusBg = 'bg-green-50 dark:bg-green-900/20';
+            } else if (isReview) {
+                statusColor = 'text-yellow-600';
+                statusBg = 'bg-yellow-50 dark:bg-yellow-900/20';
+            } else {
+                statusColor = 'text-red-600';
+                statusBg = 'bg-red-50 dark:bg-red-900/20';
+            }
 
             // Risk color determination
             let riskColor = 'text-gray-500';
@@ -738,6 +756,16 @@
                         <h3 class="text-xl font-semibold text-green-800 dark:text-green-300 mb-3">Approved Amount</h3>
                         <p class="text-3xl font-bold text-green-700 dark:text-green-400">
                             ₹${escaped.approvedAmount || 0}
+                        </p>
+                    </div>
+                `;
+            } else if (isReview) {
+                html += `
+                    <div class="bg-yellow-50 dark:bg-yellow-900/20 p-6 rounded-xl mb-6 border border-yellow-200 dark:border-yellow-800">
+                        <h3 class="text-xl font-semibold text-yellow-800 dark:text-yellow-300 mb-3">Manual Review Required</h3>
+                        <p class="text-gray-800 dark:text-gray-200 font-medium">${escaped.primaryReason}</p>
+                        <p class="text-sm text-yellow-700 dark:text-yellow-400 mt-2">
+                            This claim has been flagged for human adjudication. Our team will review the details and confirm the final outcome.
                         </p>
                     </div>
                 `;

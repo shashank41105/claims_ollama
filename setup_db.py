@@ -66,6 +66,7 @@ def init_database():
         risk_level TEXT,
         risk_score INTEGER,
         file_path TEXT,
+        icd10_code TEXT,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     )
     """)

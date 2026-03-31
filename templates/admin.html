@@ -5,12 +5,35 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Admin - ClaimTrackr</title>
     <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 </head>
 <body class="bg-gray-100 min-h-screen p-8">
-    <div class="max-w-4xl mx-auto">
+    <div class="max-w-6xl mx-auto">
         <div class="flex justify-between items-center mb-8">
-            <h1 class="text-3xl font-bold text-gray-800">Exclusion Management</h1>
-            <a href="/" class="text-blue-500 hover:text-blue-700">← Back to Claims</a>
+            <h1 class="text-3xl font-bold text-gray-800">Admin Dashboard</h1>
+            <div class="space-x-4">
+                <a href="/admin/review" class="text-blue-500 hover:text-blue-700 font-semibold bg-blue-50 px-3 py-1 rounded">Review Queue</a>
+                <a href="/" class="text-blue-500 hover:text-blue-700 font-semibold text-sm">← Back to Claims</a>
+            </div>
+        </div>
+        
+        <!-- Dashboard Stats -->
+        <div class="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
+            <div class="bg-white rounded-xl shadow-md p-6 border-l-4 border-blue-500">
+                <h3 class="text-gray-500 text-sm font-medium tracking-wide uppercase">Total Claims Processed</h3>
+                <p class="text-3xl font-bold text-gray-800 mt-2" id="statTotal">--</p>
+            </div>
+            <div class="bg-white rounded-xl shadow-md p-6 border-l-4 border-green-500">
+                <h3 class="text-gray-500 text-sm font-medium tracking-wide uppercase">Amount Saved (Rejections)</h3>
+                <p class="text-3xl font-bold text-green-600 mt-2" id="statSaved">--</p>
+            </div>
+            <div class="bg-white rounded-xl shadow-md p-6 border-l-4 border-purple-500 md:col-span-2">
+                <h3 class="text-gray-500 text-sm font-medium tracking-wide uppercase mb-3">Claim Status Distribution</h3>
+                <div class="h-5 bg-gray-100 rounded-full overflow-hidden flex shadow-inner" id="statusBar">
+                </div>
+                <div class="flex justify-between text-xs mt-3 text-gray-500 font-medium" id="statusLegend">
+                </div>
+            </div>
         </div>
         
         <!-- Add New Exclusion -->
@@ -123,6 +146,45 @@
                 alert('Error: ' + err.message);
             }
         }
+
+        // Fetch Stats
+        async function fetchStats() {
+            try {
+                const res = await fetch('/admin/api/stats');
+                const data = await res.json();
+                
+                document.getElementById('statTotal').textContent = data.total_claims;
+                document.getElementById('statSaved').textContent = '₹' + Math.round(data.amount_saved).toLocaleString();
+                
+                const total = data.total_claims || 1; // avoid /0
+                const accepted = data.statuses['ACCEPTED'] || 0;
+                const rejected = data.statuses['REJECTED'] || 0;
+                const review = data.statuses['REQUIRES_REVIEW'] || 0;
+                
+                const aPct = (accepted / total) * 100;
+                const rPct = (rejected / total) * 100;
+                const rvPct = (review / total) * 100;
+                
+                document.getElementById('statusBar').innerHTML = `
+                    <div style="width: ${aPct}%" class="bg-green-500 flex items-center justify-center text-white text-xs font-bold transition-all duration-1000"></div>
+                    <div style="width: ${rvPct}%" class="bg-yellow-400 flex items-center justify-center text-white text-xs font-bold transition-all duration-1000"></div>
+                    <div style="width: ${rPct}%" class="bg-red-500 flex items-center justify-center text-white text-xs font-bold transition-all duration-1000"></div>
+                `;
+                
+                document.getElementById('statusLegend').innerHTML = `
+                    <span class="flex items-center"><span class="w-3 h-3 rounded-full bg-green-500 mr-1"></span> Accepted (${accepted})</span>
+                    <span class="flex items-center"><span class="w-3 h-3 rounded-full bg-yellow-400 mr-1"></span> Review (${review})</span>
+                    <span class="flex items-center"><span class="w-3 h-3 rounded-full bg-red-500 mr-1"></span> Rejected (${rejected})</span>
+                `;
+            } catch (err) {
+                console.error("Failed to fetch stats", err);
+            }
+        }
+        
+        // Load stats on screen
+        fetchStats();
+        // Refresh every 10 seconds
+        setInterval(fetchStats, 10000);
     </script>
 </body>
 </html>
